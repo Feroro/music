@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex"> <!-- 限定公開用に検索避けを設定 -->
+    <title>Artist Discography Tracker</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1', // Indigo 500
+                        secondary: '#a855f7', // Purple 500
+                        dark: '#0f172a', // Slate 900
+                        card: '#1e293b', // Slate 800
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Babel (for JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Axios -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Fetch JSONP (For iTunes API CORS support) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fetch-jsonp/1.1.3/fetch-jsonp.min.js"></script>
+    <!-- Fetch JSONP (For iTunes API CORS support) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fetch-jsonp/1.1.3/fetch-jsonp.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body {
+            background-color: #0f172a;
+            /* Slate 900 */
+            color: #f8fafc;
+            /* Slate 50 */
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // --- Utils ---
+        const formatDate = (dateStr) => {
+            if (!dateStr) return '';
+            return new Date(dateStr).getFullYear();
+        };
+
+        // --- Hooks ---
+        const useLocalStorage = (key, initialValue) => {
+            const [storedValue, setStoredValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error(error);
+                    return initialValue;
+                }
+            });
+
+            const setValue = (value) => {
+                try {
+                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    setStoredValue(valueToStore);
+                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+                } catch (error) {
+                    console.error(error);
+                }
+            };
+
+            return [storedValue, setValue];
+        };
+
+        // --- Components ---
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            // Lucide icons are injected globally, but usually handled via creating elements.
+            // For simple usage in React without the proper React library wrapper, we can try to render svg manually or use a wrapper.
+            // However, Lucide's script creates `lucide` global. `lucide.createIcons()` scans DOM.
+            // In React, it's better to use `lucide-react` but we don't have it.
+            // Fallback: We will rely on simple SVG rendering or just text if icon missing, 
+            // BUT simpler: Lucide in browser usually works by `lucide.createIcons()` call after render.
+            // Let's implement a Effect that calls createIcons.
+
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            });
+
+            return <i data-lucide={name} className={className} style={{ width: size, height: size }}></i>;
+        };
+
+        // Since `lucide.createIcons` replaces <i> tags with SVGs, React might lose track of them upon re-render.
+        // A better approach for CDN React + Lucide is using `dangerouslySetInnerHTML` with the SVG string if possible,
+        // OR simply re-running createIcons aggressively.
+        // Let's try a safer SVG map approach for critical icons to avoid flicker/VDOM issues.
+        const Icons = {
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>,
+            Disc: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>,
+            Music: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>,
+            Loader: () => <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>,
+            Star: ({ filled }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>,
+            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        };
+
+        const ProgressBar = ({ total, checked }) => {
+            const percentage = total === 0 ? 0 : Math.round((checked / total) * 100);
+
+            return (
+                <div className="fixed top-0 left-0 w-full z-50 bg-card/90 backdrop-blur-sm border-b border-slate-700 shadow-lg transition-all duration-300">
+                    <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-4">
+                        <div className="flex-1">
+                            <div className="flex justify-between text-xs font-medium text-slate-400 mb-1">
+                                <span>Progress</span>
+                                <span>{checked} / {total} Songs ({percentage}%)</span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-700 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-500 ease-out"
+                                    style={{ width: `${percentage}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SearchBar = ({ onSearch, isLoading, favorites, onSelectFavorite, onRemoveFavorite }) => {
+            const [query, setQuery] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (query.trim()) onSearch(query.trim());
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center py-10 fade-in">
+                    <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 mb-2">
+                        Discography Tracker
+                    </h1>
+                    <p className="text-slate-400 mb-8">お気に入りのアーティストの楽曲をコンプリートしよう</p>
+
+                    <form onSubmit={handleSubmit} className="relative w-full max-w-lg mb-6">
+                        <input
+                            type="text"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder="アーティスト名を入力 (例: Official髭男dism)..."
+                            className="w-full pl-12 pr-4 py-4 bg-slate-800/50 border border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-white placeholder-slate-500 shadow-xl transition-all"
+                            disabled={isLoading}
+                        />
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                            {isLoading ? <Icons.Loader /> : <Icons.Search />}
+                        </div>
+                    </form>
+
+                    {/* My Artists List */}
+                    {favorites && favorites.length > 0 && (
+                        <div className="w-full max-w-3xl animate-fade-in">
+                            <h3 className="text-sm font-semibold text-slate-500 mb-3 text-center uppercase tracking-wider">My Artists</h3>
+                            <div className="flex flex-wrap justify-center gap-2">
+                                {favorites.map(fav => (
+                                    <div
+                                        key={fav.artistId}
+                                        className="group flex items-center gap-2 pl-4 pr-2 py-1.5 rounded-full bg-slate-800 border border-slate-700 hover:border-primary/50 hover:bg-slate-700/50 transition-all cursor-pointer"
+                                        onClick={() => onSelectFavorite(fav.artistName)}
+                                    >
+                                        <span className="text-sm font-medium text-slate-200">{fav.artistName}</span>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onRemoveFavorite(fav.artistId);
+                                            }}
+                                            className="p-1 rounded-full text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                            title="リストから削除"
+                                        >
+                                            <Icons.Trash />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const TrackItem = ({ track, isChecked, onToggle }) => {
+            return (
+                <div
+                    onClick={onToggle}
+                    className={`group flex items-center justify-between p-3 rounded-lg border transition-all cursor-pointer ${isChecked
+                        ? 'bg-primary/10 border-primary/30'
+                        : 'bg-slate-800/30 border-slate-700/50 hover:bg-slate-800 hover:border-slate-600'
+                        }`}
+                >
+                    <div className="flex items-center gap-3 overflow-hidden">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-primary border-primary text-white' : 'border-slate-500 group-hover:border-primary/50'
+                            }`}>
+                            {isChecked && <Icons.Check />}
+                        </div>
+                        <div className="min-w-0">
+                            <h4 className={`text-sm font-medium truncate transition-colors ${isChecked ? 'text-primary-200' : 'text-slate-200'}`}>
+                                {track.trackName}
+                            </h4>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const AlbumCard = ({ collection, tracks, checks, onToggleTrack }) => {
+            // Sort tracks by track number
+            const sortedTracks = useMemo(() => {
+                return [...tracks].sort((a, b) => a.trackNumber - b.trackNumber);
+            }, [tracks]);
+
+            const checkedCount = sortedTracks.filter(t => checks[t.trackId]).length;
+            const isCompleted = checkedCount === sortedTracks.length && sortedTracks.length > 0;
+
+            return (
+                <div className={`break-inside-avoid mb-6 rounded-xl overflow-hidden border transition-all duration-300 ${isCompleted ? 'border-primary/30 bg-primary/5 shadow-lg shadow-primary/10' : 'border-slate-700/50 bg-slate-800/40'
+                    }`}>
+                    <div className="flex items-start gap-4 p-4 border-b border-slate-700/50 bg-slate-800/60">
+                        <img
+                            src={collection.artworkUrl100?.replace('100x100', '200x200') || ''}
+                            alt={collection.collectionName}
+                            className="w-20 h-20 rounded-lg shadow-md object-cover"
+                        />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">
+                                    {formatDate(collection.releaseDate)}
+                                </span>
+                                {isCompleted && (
+                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 flex items-center gap-1">
+                                        <Icons.Check /> Completed
+                                    </span>
+                                )}
+                            </div>
+                            <h3 className="text-lg font-bold text-white leading-tight mb-1">{collection.collectionName}</h3>
+                            <p className="text-sm text-slate-400">{sortedTracks.length} Songs</p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 grid gap-2">
+                        {sortedTracks.map(track => (
+                            <TrackItem
+                                key={track.trackId}
+                                track={track}
+                                isChecked={!!checks[track.trackId]}
+                                onToggle={() => onToggleTrack(track.trackId)}
+                            />
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [data, setData] = useState({ artist: null, albums: {}, singles: [] });
+            const [items, setItems] = useState([]); // Raw items
+            const [checkedItems, setCheckedItems] = useLocalStorage('music-tracker-checks', {});
+            const [favorites, setFavorites] = useLocalStorage('music-tracker-favorites', []);
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState(null);
+
+            const searchArtist = async (term) => {
+                setIsLoading(true);
+                setError(null);
+                // Clear current data if search term changes significantly, but for better UX, maybe keep old until new loads.
+                // Keeping clean for now.
+                setData({ artist: null, albums: {}, singles: [] });
+                setItems([]);
+
+                try {
+                    // 1. Search for Artist ID first to be precise
+                    const artistRes = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=musicArtist&limit=1`);
+
+                    if (artistRes.data.resultCount === 0) {
+                        throw new Error('アーティストが見つかりません');
+                    }
+
+                    const artist = artistRes.data.results[0];
+
+                    // 2. Get all songs by Artist ID
+                    // Lookup API is better for getting all works by artistId
+                    const songsRes = await axios.get(`https://itunes.apple.com/lookup?id=${artist.artistId}&entity=song&limit=200&country=JP`);
+
+                    // Filter out the artist object itself (wrapperType='artist')
+                    const results = songsRes.data.results.filter(item => item.wrapperType === 'track');
+
+                    // Group by Collection ID
+                    const albumsMap = {};
+
+                    results.forEach(track => {
+                        const colId = track.collectionId;
+                        if (!albumsMap[colId]) {
+                            albumsMap[colId] = {
+                                info: {
+                                    collectionId: colId,
+                                    collectionName: track.collectionName,
+                                    artworkUrl100: track.artworkUrl100,
+                                    releaseDate: track.releaseDate,
+                                },
+                                tracks: []
+                            };
+                        }
+                        albumsMap[colId].tracks.push(track);
+                    });
+
+                    setItems(results);
+                    setData({ artist, albums: albumsMap });
+
+                } catch (err) {
+                    setError(err.message || 'エラーが発生しました');
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const toggleTrack = (trackId) => {
+                setCheckedItems(prev => {
+                    const next = { ...prev };
+                    if (next[trackId]) {
+                        delete next[trackId];
+                    } else {
+                        next[trackId] = true;
+                    }
+                    return next;
+                });
+            };
+
+            // Favorites Logic
+            const isFavorite = useMemo(() => {
+                return data.artist && favorites.some(f => f.artistId === data.artist.artistId);
+            }, [data.artist, favorites]);
+
+            const toggleFavorite = () => {
+                if (!data.artist) return;
+
+                setFavorites(prev => {
+                    if (isFavorite) {
+                        return prev.filter(f => f.artistId !== data.artist.artistId);
+                    } else {
+                        return [...prev, {
+                            artistId: data.artist.artistId,
+                            artistName: data.artist.artistName
+                        }];
+                    }
+                });
+            };
+
+            const removeFavoriteById = (id) => {
+                setFavorites(prev => prev.filter(f => f.artistId !== id));
+            };
+
+            // Calculate progress for CURRENT searched artist
+            const progress = useMemo(() => {
+                if (items.length === 0) return { total: 0, checked: 0 };
+                const currentIds = items.map(i => i.trackId);
+                const checkedCount = currentIds.filter(id => checkedItems[id]).length;
+                return { total: currentIds.length, checked: checkedCount };
+            }, [items, checkedItems]);
+
+            // Sort albums by release date (desc)
+            const sortedAlbums = useMemo(() => {
+                return Object.values(data.albums).sort((a, b) => {
+                    return new Date(b.info.releaseDate) - new Date(a.info.releaseDate);
+                });
+            }, [data.albums]);
+
+            return (
+                <div className="min-h-screen pb-20 pt-16">
+                    {/* Progress Bar (Always visible if artist loaded) */}
+                    {data.artist && (
+                        <ProgressBar total={progress.total} checked={progress.checked} />
+                    )}
+
+                    <div className="max-w-5xl mx-auto px-4">
+                        {!data.artist && <div className="h-10"></div>} {/* Spacer */}
+
+                        <SearchBar
+                            onSearch={searchArtist}
+                            isLoading={isLoading}
+                            favorites={favorites}
+                            onSelectFavorite={searchArtist}
+                            onRemoveFavorite={removeFavoriteById}
+                        />
+
+                        {error && (
+                            <div className="text-red-400 text-center bg-red-900/20 p-4 rounded-lg border border-red-900/50 mb-8">
+                                {error}
+                            </div>
+                        )}
+
+                        {data.artist && (
+                            <div className="fade-in">
+                                <div className="mb-8 text-center flex flex-col items-center gap-3">
+                                    <div className="flex items-center gap-4">
+                                        <h2 className="text-3xl font-bold text-white">{data.artist.artistName}</h2>
+                                        <button
+                                            onClick={toggleFavorite}
+                                            className={`p-2 rounded-full transition-all ${isFavorite
+                                                ? 'text-yellow-400 bg-yellow-400/10 hover:bg-yellow-400/20'
+                                                : 'text-slate-500 bg-slate-800 hover:text-yellow-400 hover:bg-slate-700'
+                                                }`}
+                                            title={isFavorite ? "マイリストから削除" : "マイリストに追加"}
+                                        >
+                                            <Icons.Star filled={isFavorite} />
+                                        </button>
+                                    </div>
+                                    <p className="text-slate-400 text-sm">Target: {items.length} Songs</p>
+                                </div>
+
+                                <div className="masonry-grid">
+                                    {sortedAlbums.map(album => (
+                                        <AlbumCard
+                                            key={album.info.collectionId}
+                                            collection={album.info}
+                                            tracks={album.tracks}
+                                            checks={checkedItems}
+                                            onToggleTrack={toggleTrack}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Empty State / Intro */}
+                        {!data.artist && !isLoading && !error && (
+                            <div className="text-center text-slate-600 mt-20">
+                                <Icons.Music />
+                                <p className="mt-2 text-sm">Search to start tracking</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Masonry Layout CSS adjustment for columns */}
+                    <style>{`
+                        .masonry-grid {
+                            column-count: 1;
+                            column-gap: 1.5rem;
+                        }
+                        @media (min-width: 640px) {
+                            .masonry-grid { column-count: 2; }
+                        }
+                        @media (min-width: 1024px) {
+                            .masonry-grid { column-count: 3; }
+                        }
+                    `}</style>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
