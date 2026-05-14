@@ -368,8 +368,8 @@ async function generateAiPlan() {
     generateAiBtn.disabled = true;
 
     try {
-        // 同じサーバーに配置した api.php と通信する
-        const response = await fetch('api.php', {
+        // PHPサーバー (localhost:8000) に明示的にリクエストを送る
+        const response = await fetch('http://localhost:8000/api.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
