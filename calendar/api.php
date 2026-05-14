@@ -5,11 +5,18 @@ header('Content-Type: application/json; charset=utf-8');
 // ★ここにあなたのGemini APIキーを入力してください
 $apiKey = 'AIzaSyB9G38K_LAq6nwzf5WHdKVq6vidkVewgNQ';
 
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    header("Access-Control-Allow-Origin: *");
-    header("Access-Control-Allow-Methods: POST, OPTIONS");
-    header("Access-Control-Allow-Headers: Content-Type");
     exit(0);
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Method Not Allowed']);
+    exit;
 }
 
 // POSTデータの取得
